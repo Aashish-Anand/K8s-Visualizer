@@ -4,18 +4,36 @@ import { Html } from '@react-three/drei'
 import type { ThreeEvent } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useAppStore } from '@/stores/useAppStore'
-import type { K8sComponent } from '@/types'
+import type { K8sComponent, NodeState } from '@/types'
 
 interface K8sNodeProps {
   data: K8sComponent
   isActive?: boolean
+  nodeState?: NodeState
+  statusBadge?: 'healthy' | 'processing' | 'warning' | 'failed'
 }
 
-/** Generic 3D Kubernetes component renderer */
-export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
+/* Status badge icons — simple unicode for perf */
+const BADGE_CONFIG: Record<string, { icon: string; color: string }> = {
+  healthy:    { icon: '✓', color: '#10b981' },
+  processing: { icon: '⟳', color: '#3b82f6' },
+  warning:    { icon: '⚠', color: '#f59e0b' },
+  failed:     { icon: '✗', color: '#ef4444' },
+}
+
+/** Spring-based float: decaying oscillation instead of raw Math.sin */
+function springFloat(time: number, amplitude: number, frequency: number, damping: number): number {
+  const t = (time % 4000) / 4000
+  return amplitude * Math.sin(t * Math.PI * 2 * frequency) * Math.exp(-damping * t)
+}
+
+/** Generic 3D Kubernetes component renderer with rich state transitions */
+export default function K8sNode({ data, isActive = false, nodeState = 'idle', statusBadge }: K8sNodeProps) {
   const meshRef = useRef<THREE.Mesh>(null)
-  const glowRef = useRef<THREE.Mesh>(null)
   const [hovered, setHovered] = useState(false)
+
+  /* Shake state for error */
+  const shakeOffset = useRef(new THREE.Vector3())
 
   const selectedId = useAppStore(s => s.selectedComponentId)
   const hoveredId = useAppStore(s => s.hoveredComponentId)
@@ -32,6 +50,8 @@ export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
   const scale = data.scale || [1, 1, 1]
   const baseColor = new THREE.Color(data.color)
 
+
+
   /* Exploded view offset */
   const position = useMemo<[number, number, number]>(() => {
     if (!exploded) return data.position
@@ -43,32 +63,55 @@ export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
     ]
   }, [data.position, exploded])
 
+  /* Derive visual properties from nodeState */
+  const stateConfig = useMemo(() => {
+    switch (nodeState) {
+      case 'active':
+        return { emissive: 1.0, opacity: 0.4, showRing: true, floatAmp: 0 }
+      case 'receiving':
+        return { emissive: 0.7, opacity: 0.4, showRing: false, floatAmp: 0 }
+      case 'error':
+        return { emissive: 0.6, opacity: 0.85, showRing: false, floatAmp: 0 }
+      case 'spawning':
+        return { emissive: 0.8, opacity: 0.4, showRing: false, floatAmp: 0 }
+      case 'dying':
+        return { emissive: 0.3, opacity: 0.3, showRing: false, floatAmp: 0 }
+      default: // idle
+        return { emissive: 0.05, opacity: 1.0, showRing: false, floatAmp: 0 }
+    }
+  }, [nodeState])
+
   /* Animation */
   useFrame((_, delta) => {
     if (!meshRef.current) return
+    const time = Date.now()
 
-    /* Hover scale bounce */
-    const targetScale = isHovered ? 1.12 : isActive ? 1.06 : 1
+    /* Hover / active scale bounce with spring */
+    const targetScale = isHovered ? 1.12 : (nodeState === 'active' || isActive) ? 1.06 : nodeState === 'dying' ? 0.3 : nodeState === 'spawning' ? 1.08 : 1
     const s = meshRef.current.scale
-    s.x = THREE.MathUtils.lerp(s.x, scale[0] * targetScale, delta * 8)
-    s.y = THREE.MathUtils.lerp(s.y, scale[1] * targetScale, delta * 8)
-    s.z = THREE.MathUtils.lerp(s.z, scale[2] * targetScale, delta * 8)
+    s.x = THREE.MathUtils.lerp(s.x, scale[0] * targetScale, delta * 6)
+    s.y = THREE.MathUtils.lerp(s.y, scale[1] * targetScale, delta * 6)
+    s.z = THREE.MathUtils.lerp(s.z, scale[2] * targetScale, delta * 6)
 
-    /* Active floating */
-    if (isActive) {
-      meshRef.current.position.y = position[1] + Math.sin(Date.now() * 0.003) * 0.06
+    /* Lock vertical position to standard coordinate (do not shift/float up/down) */
+    meshRef.current.position.y = 0
+
+    /* Error shake */
+    if (nodeState === 'error') {
+      const shakeIntensity = 0.015
+      shakeOffset.current.set(
+        Math.sin(time * 0.03) * shakeIntensity,
+        Math.cos(time * 0.025) * shakeIntensity * 0.5,
+        Math.sin(time * 0.035) * shakeIntensity,
+      )
+      meshRef.current.position.x = shakeOffset.current.x
+      meshRef.current.position.z = shakeOffset.current.z
+    } else {
+      meshRef.current.position.x = 0
+      meshRef.current.position.z = 0
     }
 
-    /* Glow pulse */
-    if (glowRef.current) {
-      const glowMat = glowRef.current.material as THREE.MeshBasicMaterial
-      if (isActive || isSelected) {
-        glowMat.opacity = 0.15 + Math.sin(Date.now() * 0.004) * 0.1
-        glowRef.current.visible = true
-      } else {
-        glowRef.current.visible = false
-      }
-    }
+
   })
 
   const handleClick = useCallback((e: ThreeEvent<MouseEvent>) => {
@@ -113,7 +156,18 @@ export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
     }
   }, [data.shape])
 
-  const emissiveIntensity = isActive ? 0.8 : isSelected ? 0.5 : isHovered ? 0.3 : 0.05
+  const emissiveIntensity = nodeState === 'error'
+    ? 0.6
+    : nodeState === 'active' || isActive
+    ? stateConfig.emissive
+    : isSelected
+    ? 0.5
+    : isHovered
+    ? 0.3
+    : stateConfig.emissive
+
+  const materialColor = nodeState === 'error' ? new THREE.Color('#ef4444') : baseColor
+  const materialOpacity = wireframe ? 0.8 : stateConfig.opacity
 
   return (
     <group position={position}>
@@ -129,28 +183,18 @@ export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
       >
         {geometry}
         <meshStandardMaterial
-          color={baseColor}
-          emissive={baseColor}
+          color={materialColor}
+          emissive={materialColor}
           emissiveIntensity={emissiveIntensity}
           roughness={0.3}
           metalness={0.6}
           wireframe={wireframe}
           transparent
-          opacity={wireframe ? 0.8 : 0.92}
+          opacity={materialOpacity}
         />
       </mesh>
 
-      {/* Selection / active glow */}
-      <mesh ref={glowRef} scale={[1.6, 1.6, 1.6]} visible={false}>
-        <sphereGeometry args={[0.5, 16, 16]} />
-        <meshBasicMaterial
-          color={baseColor}
-          transparent
-          opacity={0.15}
-          side={THREE.BackSide}
-          depthWrite={false}
-        />
-      </mesh>
+
 
       {/* Selection ring */}
       {isSelected && (
@@ -160,7 +204,7 @@ export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
         </mesh>
       )}
 
-      {/* Floating label */}
+      {/* Floating label + status badge */}
       {showLabels && (
         <Html
           position={[0, data.shape === 'sphere' ? 0.6 : 0.5, 0]}
@@ -168,23 +212,53 @@ export default function K8sNode({ data, isActive = false }: K8sNodeProps) {
           distanceFactor={8}
           style={{ pointerEvents: 'none' }}
         >
-          <div
-            style={{
-              background: 'rgba(15, 23, 42, 0.85)',
-              backdropFilter: 'blur(8px)',
-              border: `1px solid ${isSelected ? '#3b82f6' : isActive ? data.color : 'rgba(148,163,184,0.2)'}`,
-              borderRadius: '6px',
-              padding: '3px 8px',
-              color: isActive ? data.color : '#e2e8f0',
-              fontSize: '11px',
-              fontFamily: "'Outfit', sans-serif",
-              fontWeight: isActive ? 600 : 400,
-              whiteSpace: 'nowrap',
-              boxShadow: isActive ? `0 0 12px ${data.color}40` : 'none',
-              transition: 'all 0.3s ease',
-            }}
-          >
-            {data.shortName || data.name}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+            {/* Status badge */}
+            {statusBadge && (
+              <div
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  background: `${BADGE_CONFIG[statusBadge].color}25`,
+                  border: `1.5px solid ${BADGE_CONFIG[statusBadge].color}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '10px',
+                  color: BADGE_CONFIG[statusBadge].color,
+                  fontWeight: 700,
+                  animation: statusBadge === 'processing' ? 'spin 1.5s linear infinite' : undefined,
+                }}
+              >
+                {BADGE_CONFIG[statusBadge].icon}
+              </div>
+            )}
+
+            {/* Name label */}
+            <div
+              style={{
+                background: 'rgba(15, 23, 42, 0.85)',
+                backdropFilter: 'blur(8px)',
+                border: `1px solid ${isSelected ? '#3b82f6' : nodeState === 'active' || isActive ? data.color : nodeState === 'error' ? '#ef4444' : 'rgba(148,163,184,0.2)'}`,
+                borderRadius: '6px',
+                padding: '3px 8px',
+                color: nodeState === 'error' ? '#ef4444' : (nodeState === 'active' || isActive) ? data.color : '#e2e8f0',
+                fontSize: '11px',
+                fontFamily: "'Outfit', sans-serif",
+                fontWeight: (nodeState === 'active' || isActive) ? 600 : 400,
+                whiteSpace: 'nowrap',
+                boxShadow: (nodeState === 'active' || isActive)
+                  ? `0 0 12px ${data.color}40`
+                  : nodeState === 'error'
+                  ? '0 0 12px rgba(239, 68, 68, 0.3)'
+                  : 'none',
+                transition: 'all 0.3s ease',
+                opacity: nodeState === 'dying' ? 0.4 : 1,
+              }}
+            >
+              {data.shortName || data.name}
+            </div>
           </div>
         </Html>
       )}

@@ -7,6 +7,7 @@ import {
   Box,
   RefreshCw,
   Gauge,
+  Clapperboard,
 } from 'lucide-react'
 import { useAppStore } from '@/stores/useAppStore'
 import { getDiagramById } from '@/data/registry'
@@ -28,6 +29,8 @@ export default function Toolbar() {
   const toggleWireframe = useAppStore(s => s.toggleWireframe)
   const autoRotate = useAppStore(s => s.autoRotate)
   const toggleAutoRotate = useAppStore(s => s.toggleAutoRotate)
+  const cinematicMode = useAppStore(s => s.cinematicMode)
+  const toggleCinematicMode = useAppStore(s => s.toggleCinematicMode)
 
   const diagram = getDiagramById(activeDiagramId)
   const hasAnimation = diagram?.steps && diagram.steps.length > 0
@@ -132,6 +135,10 @@ export default function Toolbar() {
       <button onClick={toggleAutoRotate} style={buttonStyle(autoRotate)}>
         <RefreshCw size={13} />
         Rotate
+      </button>
+      <button onClick={toggleCinematicMode} style={buttonStyle(cinematicMode)}>
+        <Clapperboard size={13} />
+        Cinematic
       </button>
     </header>
   )

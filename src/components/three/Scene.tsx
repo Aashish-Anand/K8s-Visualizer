@@ -1,7 +1,9 @@
 import { Suspense, useMemo } from 'react'
 import { Canvas } from '@react-three/fiber'
 import { Environment } from '@react-three/drei'
-import { EffectComposer, Bloom, Vignette } from '@react-three/postprocessing'
+import * as THREE from 'three'
+import { EffectComposer, Bloom, Vignette, ChromaticAberration, Noise } from '@react-three/postprocessing'
+import { BlendFunction } from 'postprocessing'
 import CameraController from './CameraController'
 import GridFloor from './GridFloor'
 import K8sNode from './K8sNode'
@@ -67,7 +69,7 @@ export default function Scene() {
 
         {/* Group bounding boxes */}
         {diagram.groups.map(group => (
-          <GroupBox key={group.id} group={group} />
+          <GroupBox key={group.id} group={group} activeNodeIds={activeNodeIds} />
         ))}
 
         {/* Connections */}
@@ -86,6 +88,8 @@ export default function Scene() {
             key={node.id}
             data={node}
             isActive={activeNodeIds.has(node.id)}
+            nodeState={currentStep?.nodeStates?.[node.id] || (activeNodeIds.has(node.id) ? 'active' : 'idle')}
+            statusBadge={currentStep?.statusBadges?.[node.id]}
           />
         ))}
 
@@ -102,6 +106,7 @@ export default function Scene() {
               connectionTo={conn.to}
               isPlaying={isPlaying}
               speed={playbackSpeed}
+              connectionType={conn.type}
             />
           )
         })}
@@ -109,12 +114,23 @@ export default function Scene() {
         {/* Postprocessing */}
         <EffectComposer>
           <Bloom
-            intensity={0.8}
-            luminanceThreshold={0.6}
-            luminanceSmoothing={0.9}
+            intensity={1.0}
+            luminanceThreshold={0.7}
+            luminanceSmoothing={0.8}
             mipmapBlur
           />
-          <Vignette offset={0.3} darkness={0.6} />
+          <ChromaticAberration
+            offset={new THREE.Vector2(0.0004, 0.0004) as any}
+            radialModulation={true}
+            modulationOffset={0.5}
+            blendFunction={BlendFunction.NORMAL}
+          />
+          <Noise
+            premultiply
+            blendFunction={BlendFunction.SOFT_LIGHT}
+            opacity={0.15}
+          />
+          <Vignette offset={0.25} darkness={0.7} />
         </EffectComposer>
       </Suspense>
     </Canvas>

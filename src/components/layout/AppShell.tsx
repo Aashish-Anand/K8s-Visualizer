@@ -1,7 +1,7 @@
 import Sidebar from './Sidebar'
 import Toolbar from './Toolbar'
 import InfoPanel from './InfoPanel'
-import Timeline from './Timeline'
+import NarrationCard from './NarrationCard'
 import Scene from '@/components/three/Scene'
 import { useAppStore } from '@/stores/useAppStore'
 
@@ -15,9 +15,9 @@ export default function AppShell() {
       <Sidebar />
       <main style={{ gridArea: 'canvas', position: 'relative', overflow: 'hidden', minHeight: 0 }}>
         <Scene />
+        <NarrationCard />
       </main>
       <InfoPanel />
-      <Timeline />
     </div>
   )
 }

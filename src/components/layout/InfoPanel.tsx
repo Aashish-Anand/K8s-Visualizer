@@ -22,7 +22,11 @@ export default function InfoPanel() {
     return diagram.nodes.find(n => n.id === selectedId) || null
   }, [selectedId, diagram])
 
-  if (panelCollapsed || !component) {
+  if (panelCollapsed) {
+    return <aside style={{ display: 'none', gridArea: 'panel' }} />
+  }
+
+  if (!component) {
     return (
       <aside
         style={{
@@ -32,15 +36,13 @@ export default function InfoPanel() {
           justifyContent: 'center',
           background: 'var(--bg-card)',
           borderLeft: '1px solid var(--border-default)',
-          opacity: selectedId ? 1 : 0.5,
+          opacity: 0.5,
         }}
       >
-        {!selectedId && (
-          <div style={{ textAlign: 'center', padding: '20px', color: 'var(--fg-muted)' }}>
-            <BookOpen size={24} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
-            <p style={{ fontSize: '12px' }}>Click a component to view details</p>
-          </div>
-        )}
+        <div style={{ textAlign: 'center', padding: '20px', color: 'var(--fg-muted)' }}>
+          <BookOpen size={24} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
+          <p style={{ fontSize: '12px' }}>Click a component to view details</p>
+        </div>
       </aside>
     )
   }

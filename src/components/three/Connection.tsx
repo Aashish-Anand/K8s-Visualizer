@@ -10,9 +10,20 @@ interface ConnectionProps {
   isHighlighted?: boolean
 }
 
-/** Animated connection line between two K8s components */
+/* Type-specific visual config */
+const TYPE_CONFIG: Record<string, { color: string; dashSize: number; gapSize: number; lineWidth: number }> = {
+  control: { color: '#8b5cf6', dashSize: 0.12, gapSize: 0.06, lineWidth: 1.5 },
+  data:    { color: '#10b981', dashSize: 0.25, gapSize: 0.12, lineWidth: 1 },
+  network: { color: '#06b6d4', dashSize: 0.18, gapSize: 0.10, lineWidth: 1 },
+  storage: { color: '#f59e0b', dashSize: 0.3,  gapSize: 0.2,  lineWidth: 1.5 },
+  external:{ color: '#ec4899', dashSize: 0.15, gapSize: 0.08, lineWidth: 1 },
+}
+
+/** Animated connection line between two K8s components with type differentiation */
 export default function Connection({ connection, nodes, isHighlighted = false }: ConnectionProps) {
   const lineRef = useRef<THREE.Line>(null)
+  const glowTubeRef = useRef<THREE.Mesh>(null)
+  const arrowRef = useRef<THREE.Mesh>(null)
   const dashOffset = useRef(0)
 
   const selectedId = useAppStore(s => s.selectedComponentId)
@@ -24,6 +35,7 @@ export default function Connection({ connection, nodes, isHighlighted = false }:
   if (!fromNode || !toNode) return null
 
   const factor = exploded ? 1.4 : 1
+  const typeConfig = TYPE_CONFIG[connection.type] || TYPE_CONFIG.data
 
   const fromPos = useMemo(() =>
     new THREE.Vector3(
@@ -50,34 +62,70 @@ export default function Connection({ connection, nodes, isHighlighted = false }:
 
   const points = useMemo(() => curve.getPoints(48), [curve])
 
+  /* Glow tube geometry for highlighted connections */
+  const tubeGeometry = useMemo(() => {
+    return new THREE.TubeGeometry(curve, 32, 0.035, 8, false)
+  }, [curve])
+
+  /* Arrow direction at the endpoint */
+  const arrowData = useMemo(() => {
+    const endPoint = curve.getPoint(0.92)
+    const tipPoint = curve.getPoint(0.98)
+    const direction = new THREE.Vector3().subVectors(tipPoint, endPoint).normalize()
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 1, 0),
+      direction
+    )
+    return { position: tipPoint, quaternion }
+  }, [curve])
+
   const lineObject = useMemo(() => {
     const geometry = new THREE.BufferGeometry().setFromPoints(points)
+    const color = connection.color || typeConfig.color
     const material = new THREE.LineDashedMaterial({
-      color: getLineColor(connection),
+      color,
       transparent: true,
       opacity: 0.3,
-      dashSize: 0.2,
-      gapSize: 0.15,
+      dashSize: typeConfig.dashSize,
+      gapSize: typeConfig.gapSize,
     })
     const line = new THREE.Line(geometry, material)
     line.computeLineDistances()
     return line
-  }, [points, connection])
+  }, [points, connection, typeConfig])
 
   const isRelated = selectedId === connection.from || selectedId === connection.to
-  const opacity = isHighlighted ? 0.9 : isRelated ? 0.7 : selectedId ? 0.12 : 0.3
+  const targetOpacity = isHighlighted ? 0.95 : isRelated ? 0.7 : selectedId ? 0.08 : 0.25
 
-  /* Animate dash offset */
+  /* Animate dash offset + glow tube */
   useFrame((_, delta) => {
     if (!lineObject) return
     const mat = lineObject.material as THREE.LineDashedMaterial & { dashOffset: number }
+
     if (connection.animated || isHighlighted) {
-      dashOffset.current -= delta * 2
+      dashOffset.current -= delta * (isHighlighted ? 3 : 2)
       mat.dashOffset = dashOffset.current
     }
-    mat.dashSize = isHighlighted ? 0.15 : 0.2
-    mat.gapSize = isHighlighted ? 0.08 : 0.15
-    mat.opacity = THREE.MathUtils.lerp(mat.opacity, opacity, delta * 5)
+
+    /* Smooth opacity transition */
+    mat.opacity = THREE.MathUtils.lerp(mat.opacity, targetOpacity, delta * 5)
+
+    /* Glow tube visibility */
+    if (glowTubeRef.current) {
+      const tubeMat = glowTubeRef.current.material as THREE.MeshBasicMaterial
+      if (isHighlighted) {
+        glowTubeRef.current.visible = true
+        tubeMat.opacity = 0.12 + Math.sin(Date.now() * 0.004) * 0.06
+      } else {
+        glowTubeRef.current.visible = false
+      }
+    }
+
+    /* Arrow visibility */
+    if (arrowRef.current) {
+      const arrowMat = arrowRef.current.material as THREE.MeshBasicMaterial
+      arrowMat.opacity = THREE.MathUtils.lerp(arrowMat.opacity, isHighlighted ? 0.9 : isRelated ? 0.5 : 0.15, delta * 5)
+    }
   })
 
   /* Cleanup */
@@ -85,20 +133,43 @@ export default function Connection({ connection, nodes, isHighlighted = false }:
     return () => {
       lineObject.geometry.dispose()
       ;(lineObject.material as THREE.Material).dispose()
+      tubeGeometry.dispose()
     }
-  }, [lineObject])
+  }, [lineObject, tubeGeometry])
 
-  return <primitive object={lineObject} />
-}
+  const lineColor = connection.color || typeConfig.color
 
-function getLineColor(connection: K8sConnection): string {
-  if (connection.color) return connection.color
-  switch (connection.type) {
-    case 'control': return '#8b5cf6'
-    case 'data': return '#10b981'
-    case 'network': return '#06b6d4'
-    case 'storage': return '#f59e0b'
-    case 'external': return '#ec4899'
-    default: return '#64748b'
-  }
+  return (
+    <group>
+      {/* Main dashed line */}
+      <primitive object={lineObject} />
+
+      {/* Glow tube — only visible when highlighted */}
+      <mesh ref={glowTubeRef} geometry={tubeGeometry} visible={false}>
+        <meshBasicMaterial
+          color={lineColor}
+          transparent
+          opacity={0.12}
+          side={THREE.DoubleSide}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+
+      {/* Directional arrow at endpoint */}
+      <mesh
+        ref={arrowRef}
+        position={arrowData.position}
+        quaternion={arrowData.quaternion}
+      >
+        <coneGeometry args={[0.06, 0.18, 6]} />
+        <meshBasicMaterial
+          color={lineColor}
+          transparent
+          opacity={0.15}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  )
 }

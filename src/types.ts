@@ -56,6 +56,16 @@ export interface K8sGroup {
 }
 
 /* ===== Animation Types ===== */
+
+/** Visual state for nodes during animation steps */
+export type NodeState = 'idle' | 'active' | 'receiving' | 'error' | 'spawning' | 'dying'
+
+/** Status badge displayed above nodes */
+export type StatusBadge = 'healthy' | 'processing' | 'warning' | 'failed'
+
+/** Trail visual style for packet animations */
+export type TrailType = 'pulse' | 'stream' | 'wave' | 'spark'
+
 export interface PacketAnimation {
   id: string
   connectionId: string
@@ -63,6 +73,8 @@ export interface PacketAnimation {
   speed?: number
   delay?: number
   reverse?: boolean
+  /** Visual trail style — defaults to type-inferred if not specified */
+  trailType?: TrailType
 }
 
 export interface AnimationStep {
@@ -76,6 +88,12 @@ export interface AnimationStep {
   cameraTarget?: [number, number, number]
   cameraPosition?: [number, number, number]
   highlights?: string[]
+  /** Per-node visual state overrides for this step */
+  nodeStates?: Record<string, NodeState>
+  /** Per-node status badge overrides for this step */
+  statusBadges?: Record<string, StatusBadge>
+  /** Bullet-point narration for the floating card */
+  focusPoints?: string[]
 }
 
 /* ===== Diagram Types ===== */

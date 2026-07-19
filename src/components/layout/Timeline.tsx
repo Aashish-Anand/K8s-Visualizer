@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useAppStore } from '@/stores/useAppStore'
 import { getDiagramById } from '@/data/registry'
 
-/** Bottom timeline with step indicators and scrubber for animation playback */
+/** Minimal bottom timeline scrubber — step dots + progress track + keyboard hints */
 export default function Timeline() {
   const activeDiagramId = useAppStore(s => s.activeDiagramId)
   const currentStepIndex = useAppStore(s => s.currentStepIndex)
@@ -11,6 +11,7 @@ export default function Timeline() {
   const goToStep = useAppStore(s => s.goToStep)
   const nextStep = useAppStore(s => s.nextStep)
   const pause = useAppStore(s => s.pause)
+  const togglePlay = useAppStore(s => s.togglePlay)
 
   const diagram = getDiagramById(activeDiagramId)
   const steps = diagram?.steps || []
@@ -37,6 +38,29 @@ export default function Timeline() {
     }
   }, [isPlaying, currentStepIndex, totalSteps, playbackSpeed, nextStep, pause, steps])
 
+  /* Keyboard shortcuts */
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      switch (e.key) {
+        case 'ArrowRight':
+          e.preventDefault()
+          if (currentStepIndex < totalSteps - 1) goToStep(currentStepIndex + 1)
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          if (currentStepIndex > 0) goToStep(currentStepIndex - 1)
+          break
+        case ' ':
+          e.preventDefault()
+          togglePlay()
+          break
+      }
+    }
+    window.addEventListener('keydown', handleKey)
+    return () => window.removeEventListener('keydown', handleKey)
+  }, [currentStepIndex, totalSteps, goToStep, togglePlay])
+
   const handleStepClick = useCallback((index: number) => {
     goToStep(index)
   }, [goToStep])
@@ -61,38 +85,34 @@ export default function Timeline() {
   }
 
   const progress = ((currentStepIndex) / (totalSteps - 1)) * 100
-  const currentStep = steps[currentStepIndex]
 
   return (
     <footer
       style={{
         gridArea: 'timeline',
         display: 'flex',
-        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '16px',
         background: 'var(--bg-card)',
         borderTop: '1px solid var(--border-default)',
-        padding: '8px 20px',
-        overflow: 'hidden',
+        padding: '0 20px',
         minHeight: 0,
       }}
     >
-      {/* Current step info */}
+      {/* Keyboard hints */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: '6px',
+        gap: '6px',
+        flexShrink: 0,
       }}>
-        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--fg-primary)' }}>
-          {currentStep?.title || ''}
-        </span>
-        <span style={{ fontSize: '10px', color: 'var(--fg-muted)' }}>
-          Step {currentStepIndex + 1} / {totalSteps}
-        </span>
+        <kbd style={kbdStyle}>←</kbd>
+        <kbd style={kbdStyle}>→</kbd>
+        <kbd style={{ ...kbdStyle, padding: '1px 8px' }}>Space</kbd>
       </div>
 
-      {/* Progress bar */}
-      <div style={{ position: 'relative', height: '28px', display: 'flex', alignItems: 'center' }}>
+      {/* Progress bar with dots */}
+      <div style={{ flex: 1, position: 'relative', height: '28px', display: 'flex', alignItems: 'center' }}>
         {/* Track */}
         <div
           style={{
@@ -100,7 +120,7 @@ export default function Timeline() {
             top: '50%',
             left: 0,
             right: 0,
-            height: '3px',
+            height: '2px',
             background: 'var(--bg-tertiary)',
             borderRadius: '999px',
             transform: 'translateY(-50%)',
@@ -114,7 +134,7 @@ export default function Timeline() {
               background: 'linear-gradient(90deg, var(--accent-blue), var(--accent-cyan))',
               borderRadius: '999px',
               transition: 'width 0.3s ease',
-              boxShadow: '0 0 8px rgba(59, 130, 246, 0.4)',
+              boxShadow: '0 0 8px rgba(59, 130, 246, 0.3)',
             }}
           />
         </div>
@@ -135,23 +155,21 @@ export default function Timeline() {
                 left: `${x}%`,
                 top: '50%',
                 transform: 'translate(-50%, -50%)',
-                width: isCurrent ? '14px' : '8px',
-                height: isCurrent ? '14px' : '8px',
+                width: isCurrent ? '12px' : '6px',
+                height: isCurrent ? '12px' : '6px',
                 borderRadius: '50%',
                 border: isCurrent
-                  ? '2px solid var(--accent-blue)'
-                  : isPast
                   ? '2px solid var(--accent-cyan)'
-                  : '2px solid var(--fg-dim)',
+                  : 'none',
                 background: isCurrent
-                  ? 'var(--accent-blue)'
-                  : isPast
                   ? 'var(--accent-cyan)'
-                  : 'var(--bg-secondary)',
+                  : isPast
+                  ? 'var(--accent-blue)'
+                  : 'var(--fg-dim)',
                 cursor: 'pointer',
                 padding: 0,
-                transition: 'all 0.2s ease',
-                boxShadow: isCurrent ? '0 0 12px rgba(59, 130, 246, 0.5)' : 'none',
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: isCurrent ? '0 0 10px rgba(6, 182, 212, 0.5)' : 'none',
                 zIndex: isCurrent ? 2 : 1,
               }}
             />
@@ -159,17 +177,20 @@ export default function Timeline() {
         })}
       </div>
 
-      {/* Step description */}
-      <div style={{
-        fontSize: '10px',
-        color: 'var(--fg-muted)',
-        lineHeight: '1.4',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {currentStep?.description || ''}
-      </div>
+      {/* Step counter */}
+      <span style={{ fontSize: '10px', color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>
+        {currentStepIndex + 1}/{totalSteps}
+      </span>
     </footer>
   )
+}
+
+const kbdStyle: React.CSSProperties = {
+  fontSize: '9px',
+  fontFamily: 'var(--font-mono)',
+  padding: '1px 4px',
+  borderRadius: '3px',
+  background: 'rgba(148, 163, 184, 0.08)',
+  border: '1px solid rgba(148, 163, 184, 0.15)',
+  color: 'var(--fg-dim)',
 }

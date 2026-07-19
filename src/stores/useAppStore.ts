@@ -43,6 +43,8 @@ interface AppState {
   resetCamera: () => void
   focusTarget: [number, number, number] | null
   setFocusTarget: (target: [number, number, number] | null) => void
+  cinematicMode: boolean
+  toggleCinematicMode: () => void
 
   /* Search */
   searchQuery: string
@@ -120,6 +122,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetCamera: () => set((s) => ({ shouldResetCamera: s.shouldResetCamera + 1, focusTarget: null })),
   focusTarget: null,
   setFocusTarget: (target) => set({ focusTarget: target }),
+  cinematicMode: true,
+  toggleCinematicMode: () => set((s) => ({ cinematicMode: !s.cinematicMode })),
 
   /* Search */
   searchQuery: '',
